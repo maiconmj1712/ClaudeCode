@@ -12,10 +12,8 @@ export default async function AdminClinicaLayout({ children }: { children: React
   return (
     <div className="flex min-h-screen bg-neutral-50 dark:bg-neutral-950">
       <Sidebar role="ADMIN_CLINICA" />
-      <main className="flex-1 overflow-x-hidden">
-        <div className="page-container">
-          {children}
-        </div>
+      <main className="flex-1 overflow-x-hidden min-w-0">
+        {children}
       </main>
     </div>
   )

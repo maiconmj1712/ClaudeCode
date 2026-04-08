@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useSession } from 'next-auth/react'
 import { employeesApi, companiesApi } from '@/lib/api'
 import { toast } from 'sonner'
 import { PageHeader } from '@/components/shared/page-header'
@@ -9,7 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { formatDate, getInitials } from '@/lib/utils'
-import { Search, Upload, Plus, Mail, UserX, RefreshCw, Download } from 'lucide-react'
+import { Search, Upload, Plus, Mail, UserX, RefreshCw, Download, Users } from 'lucide-react'
 import type { EmployeeDto } from '@panexa/shared-types'
 
 type StatusFilter = 'ALL' | 'ACTIVE' | 'PENDING_ACTIVATION' | 'BLOCKED'
@@ -29,6 +30,8 @@ const STATUS_LABEL: Record<string, string> = {
 
 export default function ColaboradoresPage() {
   const qc = useQueryClient()
+  const { data: session } = useSession()
+  const companyId = (session?.user as any)?.companyId ?? ''
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL')
   const [importing, setImporting] = useState(false)
@@ -60,7 +63,15 @@ export default function ColaboradoresPage() {
     if (!file) return
     setImporting(true)
     try {
-      const res = await companiesApi.importEmployees(file)
+      // Parse CSV to rows (simple implementation)
+      const text = await file.text()
+      const lines = text.split('\n').filter(Boolean)
+      const headers = lines[0].split(',').map(h => h.trim())
+      const rows = lines.slice(1).map(line => {
+        const vals = line.split(',').map(v => v.trim())
+        return Object.fromEntries(headers.map((h, i) => [h, vals[i] ?? '']))
+      })
+      const res = await companiesApi.importEmployees(companyId, rows)
       toast.success(`${res.imported} colaboradores importados! ${res.errors} erros.`)
       qc.invalidateQueries({ queryKey: ['employees'] })
     } catch {
