@@ -1,0 +1,720 @@
+// ─────────────────────────────────────────────────────────────────────────────
+//  Panexa — Prisma Schema
+//  B2B2B SaaS de Saúde Ocupacional
+// ─────────────────────────────────────────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "./generated/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  ENUMS
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum Role {
+  ADMIN_PANEXA
+  ADMIN_CLINICA
+  ADMIN_EMPRESA
+  COLABORADOR
+}
+
+enum ClinicPlan {
+  FREE
+  ESSENCIAL
+  PROFISSIONAL
+  ENTERPRISE
+}
+
+enum PlanStatus {
+  ACTIVE
+  INACTIVE
+  TRIAL
+  SUSPENDED
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  FAILED
+  CANCELLED
+  REFUNDED
+  OVERDUE
+}
+
+enum PaymentMethod {
+  CREDIT_CARD
+  BOLETO
+  PIX
+}
+
+enum PaymentStatus {
+  PENDING
+  CONFIRMED
+  FAILED
+  REFUNDED
+  CHARGEBACK
+}
+
+enum CommissionStatus {
+  PENDING
+  PAID
+  HELD
+  CANCELLED
+}
+
+enum EmployeeStatus {
+  ACTIVE
+  INACTIVE
+  BLOCKED
+  PENDING_ACTIVATION
+}
+
+enum ProductType {
+  RECORRENTE
+  PONTUAL_CREDITO
+}
+
+enum ProductCategory {
+  TELEMEDICINA
+  NR1_SAUDE_MENTAL
+  ASO_EXAME_OCUPACIONAL
+  ODONTO
+  SEGURO_VIDA
+  CLUBE_VANTAGENS
+  PERICIA_MEDICA
+  LAUDO_DISTANCIA
+}
+
+enum ProductVisibility {
+  EMPRESA
+  CLINICA
+  AMBOS
+}
+
+enum LicenseStatus {
+  ACTIVE
+  SUSPENDED
+  CANCELLED
+  EXPIRED
+}
+
+enum AutomationTrigger {
+  CLINIC_SIGNUP
+  COMPANY_PURCHASE
+  EMPLOYEE_INVITE
+  PAYMENT_CONFIRMED
+  PAYMENT_FAILED
+  PAYMENT_OVERDUE_D1
+  PAYMENT_OVERDUE_D7
+  PAYMENT_OVERDUE_D12
+  PAYMENT_OVERDUE_D15
+  SUBSCRIPTION_REACTIVATED
+  MONTHLY_REPORT
+  NPS_REQUEST
+}
+
+enum AutomationChannel {
+  EMAIL
+  WHATSAPP
+  BOTH
+}
+
+enum AutomationStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+  BOUNCED
+  OPENED
+  CLICKED
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  USER — Base de todos os perfis
+// ─────────────────────────────────────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  role         Role
+  name         String
+  phone        String?
+  isActive     Boolean  @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  clinicId     String?
+  clinic       Clinic?  @relation("ClinicUsers", fields: [clinicId], references: [id])
+
+  companyId    String?
+  company      Company? @relation("CompanyUsers", fields: [companyId], references: [id])
+
+  employeeId   String?  @unique
+  employee     Employee? @relation(fields: [employeeId], references: [id])
+
+  refreshTokens RefreshToken[]
+  auditLogs     AuditLog[]
+
+  @@index([email])
+  @@index([role])
+  @@index([clinicId])
+  @@index([companyId])
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  CLINIC — L2: Clínica Ocupacional (canal de distribuição)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Clinic {
+  id              String     @id @default(cuid())
+  cnpj            String     @unique
+  razaoSocial     String
+  nomeFantasia    String?
+  slug            String     @unique
+  email           String
+  phone           String
+  address         Json?      // { street, number, complement, neighborhood, city, state, zipCode }
+  logoUrl         String?
+
+  plan            ClinicPlan @default(FREE)
+  planStatus      PlanStatus @default(TRIAL)
+  planActivatedAt DateTime?
+  planExpiresAt   DateTime?
+
+  commissionRate  Float      @default(0.30)
+  gatewaySubId    String?    // ID da subconta Asaas
+  gatewaySubStatus String?
+
+  referralCode    String     @unique
+  referredById    String?
+  referredBy      Clinic?    @relation("ClinicReferrals", fields: [referredById], references: [id])
+  referrals       Clinic[]   @relation("ClinicReferrals")
+
+  healthScore     Int        @default(0)
+  healthUpdatedAt DateTime?
+
+  // Configurações de layout (white-label)
+  primaryColor    String?    @default("#0EA5E9")
+  accentColor     String?    @default("#10B981")
+  marketingTitle  String?
+  marketingSubtitle String?
+  bannerUrl       String?
+
+  isActive        Boolean    @default(true)
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  users           User[]     @relation("ClinicUsers")
+  companies       Company[]
+  orders          Order[]
+  commissions     Commission[]
+  clinicOrders    ClinicSubscription[]
+  automationLogs  AutomationLog[]
+  products        ClinicProduct[]
+
+  @@index([slug])
+  @@index([cnpj])
+  @@index([plan])
+  @@index([planStatus])
+}
+
+// Assinatura da clínica com a Panexa (pacote recorrente)
+model ClinicSubscription {
+  id            String        @id @default(cuid())
+  clinicId      String
+  clinic        Clinic        @relation(fields: [clinicId], references: [id])
+  plan          ClinicPlan
+  amount        Float
+  paymentMethod PaymentMethod
+  gatewaySubId  String?       // ID no Asaas
+  status        PlanStatus    @default(ACTIVE)
+  currentPeriodStart DateTime
+  currentPeriodEnd   DateTime
+  cancelledAt   DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([clinicId])
+}
+
+// Produtos visíveis/disponíveis por clínica
+model ClinicProduct {
+  id        String  @id @default(cuid())
+  clinicId  String
+  clinic    Clinic  @relation(fields: [clinicId], references: [id])
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+  isEnabled Boolean @default(true)
+  customPrice Float? // Preço customizado para a clínica (null = preço padrão)
+
+  @@unique([clinicId, productId])
+  @@index([clinicId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  COMPANY — L3: Empresa-cliente
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Company {
+  id            String   @id @default(cuid())
+  cnpj          String   @unique
+  razaoSocial   String
+  nomeFantasia  String?
+  email         String
+  phone         String
+  address       Json?
+  contactName   String
+  employeeCount Int?
+
+  clinicId      String
+  clinic        Clinic   @relation(fields: [clinicId], references: [id])
+
+  referralToken String   // Token rastreável da clínica no momento da compra
+  utmSource     String?
+  utmMedium     String?
+  utmCampaign   String?
+
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  users         User[]   @relation("CompanyUsers")
+  employees     Employee[]
+  orders        Order[]
+  licenses      License[]
+
+  @@index([cnpj])
+  @@index([clinicId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  EMPLOYEE — L4: Colaborador
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Employee {
+  id           String         @id @default(cuid())
+  cpf          String
+  name         String
+  email        String
+  phone        String?
+  birthDate    DateTime?
+  department   String?
+  position     String?
+
+  companyId    String
+  company      Company        @relation(fields: [companyId], references: [id])
+
+  status       EmployeeStatus @default(PENDING_ACTIVATION)
+  inviteToken  String?        @unique
+  inviteExpiry DateTime?
+  activatedAt  DateTime?
+  consentAt    DateTime?      // LGPD consent
+
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  user         User?
+  licenses     License[]
+
+  @@unique([cpf, companyId])
+  @@index([companyId])
+  @@index([email])
+  @@index([status])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  PRODUCT — Portfólio de produtos
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Product {
+  id            String             @id @default(cuid())
+  name          String
+  description   String             @db.Text
+  shortDesc     String?
+  type          ProductType
+  category      ProductCategory
+  pricePerUnit  Float              // Preço por colaborador/mês (recorrente) ou por uso (pontual)
+  creditValue   Float?             // Para produtos pontuais: valor por crédito
+  minQuantity   Int                @default(1)
+  imageUrl      String?
+  features      String[]           // Lista de features para exibição
+  isActive      Boolean            @default(true)
+  isVisibleTo   ProductVisibility  @default(AMBOS)
+  displayOrder  Int                @default(0)
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  discountTiers   DiscountTier[]
+  orderItems      OrderItem[]
+  licenses        License[]
+  clinicProducts  ClinicProduct[]
+
+  @@index([category])
+  @@index([type])
+  @@index([isActive])
+}
+
+// Tabela de desconto progressivo por produto
+model DiscountTier {
+  id           String  @id @default(cuid())
+  productId    String
+  product      Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  minQuantity  Int
+  maxQuantity  Int?    // null = sem limite superior
+  discountPct  Float   // Ex: 0.05 = 5%
+  label        String? // Ex: "101 a 200 colaboradores"
+
+  @@index([productId])
+  @@index([minQuantity])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  ORDER — Pedido/Assinatura de empresa
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Order {
+  id              String      @id @default(cuid())
+  clinicId        String
+  clinic          Clinic      @relation(fields: [clinicId], references: [id])
+  companyId       String
+  company         Company     @relation(fields: [companyId], references: [id])
+
+  status          OrderStatus @default(PENDING)
+  totalAmount     Float
+  discountAmount  Float       @default(0)
+  finalAmount     Float
+
+  paymentMethod   PaymentMethod
+  gatewayOrderId  String?     // ID no Asaas
+  gatewayUrl      String?     // URL do boleto/PIX
+
+  referralToken   String      // Rastreabilidade: clinic_id no token
+  utmSource       String?
+  utmMedium       String?
+  utmCampaign     String?
+
+  paidAt          DateTime?
+  cancelledAt     DateTime?
+  notes           String?
+
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  items           OrderItem[]
+  payment         Payment?
+  commission      Commission?
+  licenses        License[]
+
+  @@index([clinicId])
+  @@index([companyId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model OrderItem {
+  id            String   @id @default(cuid())
+  orderId       String
+  order         Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId     String
+  product       Product  @relation(fields: [productId], references: [id])
+  quantity      Int
+  unitPrice     Float
+  discountPct   Float    @default(0)
+  totalPrice    Float
+
+  @@index([orderId])
+  @@index([productId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  PAYMENT — Transação financeira
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Payment {
+  id              String        @id @default(cuid())
+  orderId         String        @unique
+  order           Order         @relation(fields: [orderId], references: [id])
+
+  gatewayPaymentId String?      // ID no Asaas
+  method          PaymentMethod
+  status          PaymentStatus @default(PENDING)
+  amount          Float
+  installments    Int           @default(1)
+
+  billingType     String?       // CREDIT_CARD, BOLETO, PIX
+  pixQrCode       String?
+  boletoUrl       String?
+  boletoBarCode   String?
+  dueDate         DateTime?
+
+  confirmedAt     DateTime?
+  failedAt        DateTime?
+  failedReason    String?
+  refundedAt      DateTime?
+  refundedAmount  Float?
+
+  webhookData     Json?         // Payload do webhook Asaas para auditoria
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([orderId])
+  @@index([status])
+  @@index([gatewayPaymentId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  COMMISSION — Split e comissões das clínicas
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Commission {
+  id             String           @id @default(cuid())
+  orderId        String           @unique
+  order          Order            @relation(fields: [orderId], references: [id])
+  clinicId       String
+  clinic         Clinic           @relation(fields: [clinicId], references: [id])
+
+  grossAmount    Float
+  clinicPct      Float            @default(0.30)
+  clinicAmount   Float
+  panexaAmount   Float
+
+  status         CommissionStatus @default(PENDING)
+  gatewayTransferId String?       // ID da transferência Asaas para subconta
+  paidAt         DateTime?
+  heldReason     String?
+
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@index([clinicId])
+  @@index([status])
+  @@index([orderId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  LICENSE — Licença de uso de produto por colaborador
+// ─────────────────────────────────────────────────────────────────────────────
+
+model License {
+  id          String        @id @default(cuid())
+  orderId     String
+  order       Order         @relation(fields: [orderId], references: [id])
+  companyId   String
+  company     Company       @relation(fields: [companyId], references: [id])
+  productId   String
+  product     Product       @relation(fields: [productId], references: [id])
+  employeeId  String?
+  employee    Employee?     @relation(fields: [employeeId], references: [id])
+
+  status      LicenseStatus @default(ACTIVE)
+  token       String        @unique @default(cuid())
+  activatedAt DateTime?
+  expiresAt   DateTime?
+  suspendedAt DateTime?
+  cancelledAt DateTime?
+
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([orderId])
+  @@index([companyId])
+  @@index([productId])
+  @@index([employeeId])
+  @@index([status])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  AUTOMATION — Templates e logs de automações
+// ─────────────────────────────────────────────────────────────────────────────
+
+model AutomationTemplate {
+  id          String             @id @default(cuid())
+  name        String
+  trigger     AutomationTrigger
+  channel     AutomationChannel
+  subject     String?            // E-mail subject
+  body        String             @db.Text
+  isActive    Boolean            @default(true)
+  delayHours  Int                @default(0)  // Atraso em horas após o trigger
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  logs        AutomationLog[]
+
+  @@unique([trigger, channel])
+}
+
+model AutomationLog {
+  id           String             @id @default(cuid())
+  templateId   String
+  template     AutomationTemplate @relation(fields: [templateId], references: [id])
+  clinicId     String?
+  clinic       Clinic?            @relation(fields: [clinicId], references: [id])
+  recipientId  String             // userId, clinicId, companyId ou employeeId
+  recipientType String            // "user" | "clinic" | "company" | "employee"
+  channel      AutomationChannel
+  to           String             // e-mail ou número de WhatsApp
+  subject      String?
+  status       NotificationStatus @default(PENDING)
+  sentAt       DateTime?
+  openedAt     DateTime?
+  clickedAt    DateTime?
+  failedReason String?
+  externalId   String?            // ID do SendGrid ou Evolution API
+  createdAt    DateTime           @default(now())
+
+  @@index([templateId])
+  @@index([clinicId])
+  @@index([recipientId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  PLATFORM SETTINGS — Configurações globais editáveis pelo Admin Panexa
+// ─────────────────────────────────────────────────────────────────────────────
+
+model PlatformSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String   @db.Text
+  type      String   @default("string") // string | json | boolean | number
+  updatedAt DateTime @updatedAt
+  updatedBy String?  // userId
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  GAMIFICATION — Rankings e badges das clínicas
+// ─────────────────────────────────────────────────────────────────────────────
+
+model GamificationBadge {
+  id          String   @id @default(cuid())
+  name        String
+  description String
+  iconUrl     String?
+  condition   Json     // { metric: "mrr", operator: "gte", value: 10000 }
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  clinicBadges ClinicBadge[]
+}
+
+model ClinicBadge {
+  id        String             @id @default(cuid())
+  clinicId  String
+  badgeId   String
+  badge     GamificationBadge  @relation(fields: [badgeId], references: [id])
+  earnedAt  DateTime           @default(now())
+
+  @@unique([clinicId, badgeId])
+  @@index([clinicId])
+}
+
+model GamificationRanking {
+  id          String   @id @default(cuid())
+  clinicId    String
+  period      String   // "2024-01" (ano-mês)
+  position    Int
+  score       Float
+  mrr         Float
+  salesCount  Int
+  bonusPct    Float    @default(0)
+  createdAt   DateTime @default(now())
+
+  @@unique([clinicId, period])
+  @@index([period])
+  @@index([clinicId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  CREDIT — Créditos de produtos pontuais (Perícia, Laudos)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model CreditBalance {
+  id          String   @id @default(cuid())
+  clinicId    String
+  productId   String
+  balance     Int      @default(0)
+  updatedAt   DateTime @updatedAt
+
+  transactions CreditTransaction[]
+
+  @@unique([clinicId, productId])
+  @@index([clinicId])
+}
+
+model CreditTransaction {
+  id              String        @id @default(cuid())
+  creditBalanceId String
+  creditBalance   CreditBalance @relation(fields: [creditBalanceId], references: [id])
+  type            String        // "PURCHASE" | "USAGE" | "REFUND" | "ADJUSTMENT"
+  amount          Int           // positivo = crédito, negativo = débito
+  description     String?
+  orderId         String?
+  createdAt       DateTime      @default(now())
+
+  @@index([creditBalanceId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  AUDIT LOG — Registro de ações sensíveis
+// ─────────────────────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id])
+  action      String   // "CREATE_ORDER", "SUSPEND_CLINIC", "UPDATE_PRODUCT", etc.
+  entityType  String   // "Order", "Clinic", "Product", etc.
+  entityId    String
+  oldData     Json?
+  newData     Json?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  NPS — Net Promoter Score
+// ─────────────────────────────────────────────────────────────────────────────
+
+model NpsSurvey {
+  id          String   @id @default(cuid())
+  entityType  String   // "company" | "employee"
+  entityId    String
+  score       Int?     // 0-10
+  comment     String?  @db.Text
+  respondedAt DateTime?
+  sentAt      DateTime @default(now())
+  expiresAt   DateTime
+
+  @@index([entityType, entityId])
+  @@index([sentAt])
+}
