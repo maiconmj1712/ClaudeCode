@@ -6,8 +6,8 @@ interface StatCardProps {
   value: string | number
   isCurrency?: boolean
   compact?: boolean
-  trend?: number         // percentual, ex: 12.5 = +12,5%
-  trendLabel?: string    // ex: "vs. mês anterior"
+  trend?: number
+  trendLabel?: string
   icon?: React.ReactNode
   iconBg?: string
   className?: string
@@ -40,7 +40,7 @@ export function StatCard({
 
   return (
     <div className={cn('stat-card', className)}>
-      <div className="flex items-start justify-between">
+      <div className="flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
           <p className="stat-card-label">{label}</p>
           {loading ? (
@@ -79,7 +79,10 @@ export function StatCard({
           )}
         </div>
         {icon && (
-          <div className={cn('flex h-12 w-12 items-center justify-center rounded-xl flex-shrink-0', iconBg)}>
+          <div className={cn(
+            'flex h-12 w-12 items-center justify-center rounded-xl flex-shrink-0',
+            iconBg
+          )}>
             {icon}
           </div>
         )}
