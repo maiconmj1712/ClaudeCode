@@ -1,16 +1,10 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common'
 import { PrismaService } from '../../common/prisma/prisma.service'
-import { WhatsAppService } from '../automations/whatsapp.service'
-import { EmailService } from '../automations/email.service'
 import slugify from 'slugify'
 
 @Injectable()
 export class ClinicsService {
-  constructor(
-    private prisma: PrismaService,
-    private whatsapp: WhatsAppService,
-    private email: EmailService,
-  ) {}
+  constructor(private prisma: PrismaService) {}
 
   async findAll(query: { search?: string; plan?: string; status?: string; page?: number; limit?: number }) {
     const { search, plan, status, page = 1, limit = 20 } = query
@@ -48,7 +42,6 @@ export class ClinicsService {
       where: { id },
       include: {
         _count: { select: { companies: true, commissions: true } },
-        subscription: true,
       },
     })
     if (!clinic) throw new NotFoundException('Clínica não encontrada')
@@ -60,9 +53,9 @@ export class ClinicsService {
       where: { slug },
       select: {
         id: true, razaoSocial: true, slug: true, logoUrl: true,
-        primaryColor: true, secondaryColor: true, planStatus: true,
-        clinicProducts: {
-          where: { isActive: true },
+        primaryColor: true, planStatus: true,
+        products: {
+          where: { isEnabled: true },
           include: { product: { include: { discountTiers: { orderBy: { minQuantity: 'asc' } } } } },
         },
       },
@@ -94,14 +87,14 @@ export class ClinicsService {
   }
 
   async activatePlan(id: string) {
-    const clinic = await this.findOne(id)
+    await this.findOne(id)
     return this.prisma.clinic.update({
       where: { id },
       data: { planStatus: 'ACTIVE', planActivatedAt: new Date() },
     })
   }
 
-  async suspendClinic(id: string, reason: string) {
+  async suspendClinic(id: string, _reason: string) {
     await this.findOne(id)
     return this.prisma.clinic.update({
       where: { id },
@@ -137,7 +130,7 @@ export class ClinicsService {
   }
 
   async getHealthScore(clinicId: string) {
-    const clinic = await this.findOne(clinicId)
+    await this.findOne(clinicId)
     const now = new Date()
     const month = new Date(now.getFullYear(), now.getMonth(), 1)
 
@@ -188,15 +181,15 @@ export class ClinicsService {
     for (const productId of productIds) {
       await this.prisma.clinicProduct.upsert({
         where: { clinicId_productId: { clinicId, productId } },
-        create: { clinicId, productId, isActive: true },
-        update: { isActive: true },
+        create: { clinicId, productId, isEnabled: true },
+        update: { isEnabled: true },
       })
     }
 
     // Deactivate products not in the new list
     await this.prisma.clinicProduct.updateMany({
       where: { clinicId, productId: { notIn: productIds } },
-      data: { isActive: false },
+      data: { isEnabled: false },
     })
 
     return this.getClinicProducts(clinicId)

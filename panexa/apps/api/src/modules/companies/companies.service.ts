@@ -158,7 +158,7 @@ export class CompaniesService {
   }
 
   async importEmployees(companyId: string, rows: any[]) {
-    const company = await this.findOne(companyId)
+    await this.findOne(companyId)
     const results = { created: 0, skipped: 0, errors: [] as string[] }
 
     for (const row of rows) {
@@ -177,7 +177,7 @@ export class CompaniesService {
             cpf: row.cpf?.replace(/\D/g, ''),
             email: row.email,
             phone: row.phone,
-            birthdate: row.birthdate ? new Date(row.birthdate) : null,
+            birthDate: row.birthdate ? new Date(row.birthdate) : null,
             companyId,
           },
         })
